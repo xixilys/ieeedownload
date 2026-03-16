@@ -45,7 +45,7 @@ def create_harvester(
     headless: bool = False,
 ) -> JSSCHarvester:
     if not headless:
-        logger.info("Launching containerized Chromium inside Xvfb; no macOS window will appear.")
+        logger.info("Launching Chromium inside a virtual display; no macOS window will appear.")
     return JSSCHarvester(
         output_root=output_root,
         state_file=state_file,

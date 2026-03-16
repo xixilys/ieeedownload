@@ -8,5 +8,6 @@ downloads/
 *.tar.gz
 *.bak_*
 tmp_container_smoke*/
+tmp_orb_smoke*/
 
 .DS_Store
