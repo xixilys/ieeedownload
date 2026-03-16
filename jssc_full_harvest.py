@@ -10,7 +10,12 @@ import argparse
 import json
 import logging
 import re
+import shutil
+import subprocess
+import tempfile
+import threading
 import time
+import urllib.request
 from collections import defaultdict
 from json import JSONDecodeError
 from pathlib import Path
@@ -45,6 +50,38 @@ LONG_BREAK_EVERY = 10
 LONG_BREAK_SECONDS = 120
 IEEE_BASE_URL = "https://ieeexplore.ieee.org"
 DEFAULT_OUTPUT_ROOT = BASE_DIR / "downloads" / "jssc_full_harvest"
+DEFAULT_BROWSER_ARGS = ["--disable-blink-features=AutomationControlled"]
+BACKGROUND_WINDOW_ARGS = [
+    "--window-position=4000,40",
+    "--window-size=1200,860",
+    "--start-minimized",
+]
+BACKGROUND_CDP_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--window-position=4000,40",
+    "--window-size=1200,860",
+    "--no-first-run",
+    "--no-default-browser-check",
+]
+HIDE_CHROMIUM_OSASCRIPT = """
+tell application "Chromium"
+    if it is running then
+        try
+            repeat with w in every window
+                try
+                    set bounds of w to {4000, 40, 5200, 900}
+                end try
+                try
+                    set miniaturized of w to true
+                end try
+            end repeat
+        end try
+        try
+            hide
+        end try
+    end if
+end tell
+"""
 
 
 def sanitize_filename(name: str) -> str:
@@ -120,45 +157,65 @@ def build_issue_url(record: Dict) -> Optional[str]:
     return None
 
 
+def hide_chromium_windows() -> None:
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", HIDE_CHROMIUM_OSASCRIPT],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception as e:
+        logger.warning("Failed to hide Chromium windows: %s", e)
+        return
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        logger.warning("Failed to hide Chromium windows: %s", stderr or result.returncode)
+
+
+def reserve_local_port() -> int:
+    import socket
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
 class JSSCHarvester:
     def __init__(
         self,
         output_root: Path,
         state_file: Optional[Path] = None,
         headless: bool = False,
+        hide_browser: bool = False,
     ) -> None:
         self.output_root = output_root
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.headless = headless
+        self.hide_browser = hide_browser and not headless
+        self._hide_stop_event: Optional[threading.Event] = None
+        self._hide_thread: Optional[threading.Thread] = None
+        self._background_browser_proc: Optional[subprocess.Popen] = None
+        self._background_browser_port: Optional[int] = None
+        self._background_user_data_dir: Optional[Path] = None
 
         if state_file is None:
             state_file = AUTO_STATE_FILE if AUTO_STATE_FILE.exists() else DEFAULT_STATE_FILE
         self.state_file = Path(state_file)
 
+        if self.hide_browser:
+            self._start_hide_worker()
+
         self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(
-            headless=self.headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        context_kwargs = {
-            "viewport": {"width": 1600, "height": 1000},
-            "user_agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "accept_downloads": True,
-        }
-        if self.state_file.exists():
-            context_kwargs["storage_state"] = str(self.state_file)
-        self.context = self.browser.new_context(**context_kwargs)
-        self.page = self.context.new_page()
-        self.api = self.context.request
-        self.page.set_default_timeout(60000)
+        self._launch_browser()
 
         self._ensure_ieee_access()
 
     def close(self) -> None:
+        self._stop_hide_worker()
         try:
             self.context.storage_state(path=str(self.state_file))
         except Exception:
@@ -175,7 +232,151 @@ class JSSCHarvester:
             self.browser.close()
         except Exception:
             pass
+        self._cleanup_background_browser()
         self.playwright.stop()
+
+    def _start_hide_worker(self) -> None:
+        if self._hide_thread is not None:
+            return
+
+        self._hide_stop_event = threading.Event()
+
+        def keep_hiding() -> None:
+            while self._hide_stop_event is not None and not self._hide_stop_event.is_set():
+                hide_chromium_windows()
+                time.sleep(0.75)
+
+        self._hide_thread = threading.Thread(
+            target=keep_hiding,
+            name="chromium-hide-worker",
+            daemon=True,
+        )
+        self._hide_thread.start()
+
+    def _stop_hide_worker(self) -> None:
+        if self._hide_stop_event is not None:
+            self._hide_stop_event.set()
+        if self._hide_thread is not None:
+            self._hide_thread.join(timeout=2)
+        self._hide_stop_event = None
+        self._hide_thread = None
+
+    def _cleanup_background_browser(self) -> None:
+        if self._background_browser_proc is not None:
+            try:
+                self._background_browser_proc.terminate()
+                self._background_browser_proc.wait(timeout=5)
+            except Exception:
+                pass
+        if self._background_user_data_dir is not None:
+            shutil.rmtree(self._background_user_data_dir, ignore_errors=True)
+        self._background_browser_proc = None
+        self._background_browser_port = None
+        self._background_user_data_dir = None
+
+    def _build_context_kwargs(self) -> Dict:
+        context_kwargs = {
+            "viewport": {"width": 1600, "height": 1000},
+            "user_agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "accept_downloads": True,
+        }
+        if self.state_file.exists():
+            context_kwargs["storage_state"] = str(self.state_file)
+        return context_kwargs
+
+    def _apply_saved_state_to_context(self, context) -> None:
+        if not self.state_file.exists():
+            return
+        try:
+            state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("Failed reading storage state %s: %s", self.state_file, e)
+            return
+
+        cookies = state.get("cookies") or []
+        if cookies:
+            try:
+                context.add_cookies(cookies)
+            except Exception as e:
+                logger.warning("Failed loading cookies into background context: %s", e)
+
+    def _launch_browser(self) -> None:
+        if self.hide_browser:
+            self.browser = self._launch_background_browser_via_cdp()
+            contexts = self.browser.contexts
+            self.context = contexts[0] if contexts else self.browser.new_context()
+            self._apply_saved_state_to_context(self.context)
+        else:
+            launch_args = list(DEFAULT_BROWSER_ARGS)
+            self.browser = self.playwright.chromium.launch(
+                headless=self.headless,
+                args=launch_args,
+            )
+            self.context = self.browser.new_context(**self._build_context_kwargs())
+        self.page = self.context.new_page()
+        self.api = self.context.request
+        self.page.set_default_timeout(60000)
+        if self.hide_browser:
+            hide_chromium_windows()
+
+    def _launch_background_browser_via_cdp(self):
+        executable_path = Path(self.playwright.chromium.executable_path)
+        port = reserve_local_port()
+        user_data_dir = Path(
+            tempfile.mkdtemp(prefix="jssc_chromium_bg_", dir="/tmp")
+        )
+        command = [
+            str(executable_path),
+            f"--remote-debugging-port={port}",
+            "--remote-debugging-address=127.0.0.1",
+            f"--user-data-dir={user_data_dir}",
+            *BACKGROUND_CDP_ARGS,
+            "about:blank",
+        ]
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        deadline = time.time() + 30
+        browser = None
+        websocket_endpoint = None
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                raise RuntimeError(
+                    f"Background Chromium exited early with returncode={proc.returncode}"
+                )
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/json/version", timeout=1
+                ) as response:
+                    version = json.load(response)
+                websocket_endpoint = version.get("webSocketDebuggerUrl")
+                if not websocket_endpoint:
+                    raise RuntimeError("Missing webSocketDebuggerUrl from DevTools endpoint")
+                browser = self.playwright.chromium.connect_over_cdp(websocket_endpoint)
+                break
+            except Exception:
+                time.sleep(0.5)
+
+        if browser is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            raise RuntimeError("Failed to connect to background Chromium over CDP")
+
+        self._background_browser_proc = proc
+        self._background_browser_port = port
+        self._background_user_data_dir = user_data_dir
+        return browser
 
     def _ensure_ieee_access(self) -> None:
         for attempt in range(1, 4):
@@ -235,25 +436,8 @@ class JSSCHarvester:
         except Exception:
             pass
 
-        self.browser = self.playwright.chromium.launch(
-            headless=self.headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        context_kwargs = {
-            "viewport": {"width": 1600, "height": 1000},
-            "user_agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "accept_downloads": True,
-        }
-        if self.state_file.exists():
-            context_kwargs["storage_state"] = str(self.state_file)
-        self.context = self.browser.new_context(**context_kwargs)
-        self.page = self.context.new_page()
-        self.api = self.context.request
-        self.page.set_default_timeout(60000)
+        self._cleanup_background_browser()
+        self._launch_browser()
 
         try:
             self._ensure_ieee_access()
@@ -278,22 +462,8 @@ class JSSCHarvester:
             self.state_file.unlink()
 
         logger.info("Falling back to hard reconnect with cleared storage state...")
-        self.browser = self.playwright.chromium.launch(
-            headless=self.headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        self.context = self.browser.new_context(
-            viewport={"width": 1600, "height": 1000},
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            accept_downloads=True,
-        )
-        self.page = self.context.new_page()
-        self.api = self.context.request
-        self.page.set_default_timeout(60000)
+        self._cleanup_background_browser()
+        self._launch_browser()
 
         self._ensure_ieee_access()
 
@@ -776,12 +946,22 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run Playwright Chromium in headless mode",
     )
+    parser.add_argument(
+        "--hide-browser",
+        action="store_true",
+        help="Keep the headed Chromium window hidden/minimized and moved off-screen on macOS",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    harvester = JSSCHarvester(args.output_root, args.state_file, headless=args.headless)
+    harvester = JSSCHarvester(
+        args.output_root,
+        args.state_file,
+        headless=args.headless,
+        hide_browser=args.hide_browser,
+    )
     try:
         harvester.run(args.start_year, args.end_year, args.max_downloads_per_year)
     finally:

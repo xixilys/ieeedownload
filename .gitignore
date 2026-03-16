@@ -6,5 +6,6 @@ downloads/
 *.pdf
 *.png
 *.tar.gz
+*.bak_*
 
 .DS_Store

@@ -32,7 +32,13 @@ def year_stats(output_root: Path, year: int) -> Dict[str, Optional[int]]:
     return {"total": total, "done": done, "missing": missing}
 
 
-def run_batch(output_root: Path, year: int, batch_size: int, headless: bool = False) -> int:
+def run_batch(
+    output_root: Path,
+    year: int,
+    batch_size: int,
+    headless: bool = False,
+    hide_browser: bool = False,
+) -> int:
     cmd = [
         PYTHON,
         str(HARVEST_SCRIPT),
@@ -47,7 +53,15 @@ def run_batch(output_root: Path, year: int, batch_size: int, headless: bool = Fa
     ]
     if headless:
         cmd.append("--headless")
-    logger.info("Launching batch for year=%s batch_size=%s headless=%s", year, batch_size, headless)
+    if hide_browser:
+        cmd.append("--hide-browser")
+    logger.info(
+        "Launching batch for year=%s batch_size=%s headless=%s hide_browser=%s",
+        year,
+        batch_size,
+        headless,
+        hide_browser,
+    )
     logger.info("Command: %s", " ".join(cmd))
     proc = subprocess.run(cmd)
     logger.info("Batch finished for year=%s returncode=%s", year, proc.returncode)
@@ -63,6 +77,11 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--full-cycle-sleep-seconds", type=int, default=300)
     parser.add_argument("--headless", action="store_true", help="Run child Playwright harvest batches in headless mode")
+    parser.add_argument(
+        "--hide-browser",
+        action="store_true",
+        help="Keep headed Chromium hidden/minimized and moved off-screen on macOS",
+    )
     args = parser.parse_args()
 
     while True:
@@ -78,7 +97,13 @@ def main() -> None:
                 continue
 
             remaining_any = True
-            rc = run_batch(args.output_root, year, args.batch_size, headless=args.headless)
+            rc = run_batch(
+                args.output_root,
+                year,
+                args.batch_size,
+                headless=args.headless,
+                hide_browser=args.hide_browser,
+            )
             after = year_stats(args.output_root, year)
             logger.info("Year=%s after batch stats: %s", year, after)
 
