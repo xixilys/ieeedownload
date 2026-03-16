@@ -1,0 +1,10 @@
+FROM mcr.microsoft.com/playwright/python:v1.52.0-noble
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN python -m pip install --no-cache-dir playwright==1.52.0
+
+WORKDIR /work
+
+ENTRYPOINT ["xvfb-run", "-a", "python", "-u", "/work/jssc_container_catchup.py"]

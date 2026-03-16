@@ -7,5 +7,6 @@ downloads/
 *.png
 *.tar.gz
 *.bak_*
+tmp_container_smoke*/
 
 .DS_Store
