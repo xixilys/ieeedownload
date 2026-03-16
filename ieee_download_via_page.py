@@ -18,6 +18,7 @@ from playwright.sync_api import BrowserContext, Page
 IEEE_DOC_URL_TEMPLATE = "https://ieeexplore.ieee.org/document/{article_number}"
 STAMP_PAGE_URL_TEMPLATE = "https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber={article_number}"
 PDF_IFRAME_PREFIX = "https://ieeexplore.ieee.org/stampPDF/getPDF.jsp?tp=&arnumber="
+DIRECT_PDF_URL_TEMPLATE = "https://ieeexplore.ieee.org/stampPDF/getPDF.jsp?tp=&arnumber={article_number}&ref="
 PAUSE_MARKERS = [
     "You have reached the limit of download",
     "automatically paused access",
@@ -99,6 +100,13 @@ def fetch_pdf_bytes_via_document_page(
         close_page = True
 
     try:
+        def fetch_pdf_bytes(pdf_url: str) -> Optional[bytes]:
+            response = context.request.get(pdf_url, timeout=timeout_ms)
+            body = response.body()
+            if body.startswith(b"%PDF"):
+                return body
+            return None
+
         doc_url = IEEE_DOC_URL_TEMPLATE.format(article_number=article_number)
         page.goto(doc_url, wait_until="commit", timeout=timeout_ms)
         page.wait_for_timeout(5000)
@@ -148,13 +156,10 @@ def fetch_pdf_bytes_via_document_page(
 
         pdf_url = _extract_pdf_url_from_stamp(page, article_number)
         if not pdf_url:
-            return None
+            direct_pdf_url = DIRECT_PDF_URL_TEMPLATE.format(article_number=article_number)
+            return fetch_pdf_bytes(direct_pdf_url)
 
-        response = context.request.get(pdf_url, timeout=timeout_ms)
-        body = response.body()
-        if body.startswith(b"%PDF"):
-            return body
-        return None
+        return fetch_pdf_bytes(pdf_url)
     finally:
         if close_page:
             page.close()
