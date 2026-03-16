@@ -1,0 +1,10 @@
+__pycache__/
+.ruff_cache/
+
+downloads/
+*.log
+*.pdf
+*.png
+*.tar.gz
+
+.DS_Store
