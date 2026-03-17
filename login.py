@@ -4,7 +4,7 @@ IEEE Xplore 自动机构登录工具
 
 已验证流程：
 IEEE -> Institutional Sign In -> Access Through Your Institution / 记住机构入口
--> 中国科技网通行证 iframe 真人式输入 -> 返回 IEEE 并保存登录态
+-> 机构 SSO iframe 真人式输入 -> 返回 IEEE 并保存登录态
 """
 
 from pathlib import Path
@@ -41,7 +41,7 @@ def main() -> None:
             print("检测到已有 IEEE 机构访问态，直接保存并退出。")
             context.storage_state(path=str(DEFAULT_STATE_FILE))
         else:
-            print("开始自动登录 UCAS / CST Cloud ...")
+            print("开始自动登录机构 SSO ...")
             auto_login_ieee_institution(page, context, credentials, DEFAULT_STATE_FILE)
             print("自动登录成功。")
 

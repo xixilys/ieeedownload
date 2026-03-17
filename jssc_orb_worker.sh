@@ -4,10 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ORB_VENV="${ORB_VENV:-$HOME/.venvs/ieee_download}"
 ORB_LOG="${ORB_LOG:-$ROOT_DIR/jssc_orb_catchup.log}"
-CREDENTIAL_FILE="${CREDENTIAL_FILE:-/mnt/mac/Users/xixilys/clawd/.credentials/ieee.env}"
+CREDENTIAL_FILE="${CREDENTIAL_FILE:-}"
 
-if [ ! -f "$CREDENTIAL_FILE" ]; then
-    echo "credential file not found: $CREDENTIAL_FILE" >&2
+if [ -n "$CREDENTIAL_FILE" ]; then
+    if [ ! -f "$CREDENTIAL_FILE" ]; then
+        echo "credential file not found: $CREDENTIAL_FILE" >&2
+        exit 1
+    fi
+elif [ -z "${IEEE_INST_NAME:-}" ] || [ -z "${IEEE_INST_USERNAME:-}" ] || [ -z "${IEEE_INST_PASSWORD:-}" ]; then
+    echo "Set CREDENTIAL_FILE or export IEEE_INST_NAME/IEEE_INST_USERNAME/IEEE_INST_PASSWORD before starting the worker." >&2
     exit 1
 fi
 
@@ -25,14 +30,16 @@ python -m pip install -q --upgrade pip
 python -m pip install -q playwright==1.58.0
 python -m playwright install --with-deps chromium
 
-while IFS='=' read -r key value; do
-    case "$key" in
-        ""|\#*)
-            continue
-            ;;
-    esac
-    export "$key=$value"
-done < "$CREDENTIAL_FILE"
+if [ -n "$CREDENTIAL_FILE" ]; then
+    while IFS='=' read -r key value; do
+        case "$key" in
+            ""|\#*)
+                continue
+                ;;
+        esac
+        export "$key=$value"
+    done < "$CREDENTIAL_FILE"
+fi
 
 cd "$ROOT_DIR"
 xvfb-run -a python -u jssc_container_catchup.py "$@" 2>&1 | tee -a "$ORB_LOG"

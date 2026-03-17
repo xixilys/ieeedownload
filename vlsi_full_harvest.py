@@ -150,8 +150,7 @@ class VLSIHarvester:
                     raise
                 self.page.wait_for_timeout(2000)
         self.page.wait_for_timeout(5000)
-        body = self.page.locator("body").inner_text(timeout=5000)
-        if "Access provided by:" in body and "University of Chinese Academy of Sciences" in body:
+        if has_ieee_institutional_access(self.page, self.context):
             logger.info("Existing IEEE institutional access detected.")
             return
 

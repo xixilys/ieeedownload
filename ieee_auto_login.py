@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-IEEE Xplore institutional auto-login helpers.
+IEEE Xplore institutional sign-in helpers.
 
-Verified flow:
+This module supports the common flow:
 1. IEEE home -> Institutional Sign In
 2. Access Through Your Institution / remembered institution entry
-3. Jump to passport.escience.cn
-4. Real visible login form lives inside oauth2 iframe
-5. Type username/password like a human and submit
-6. Return to IEEE with institutional access
+3. Redirect to the institution's SSO provider
+4. Fill the visible username/password form when automation is enabled
+5. Return to IEEE with institutional access
 """
 
 from __future__ import annotations
@@ -17,22 +16,23 @@ import os
 import time
 from pathlib import Path
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 from playwright.sync_api import BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_STATE_FILE = BASE_DIR / "downloads" / "ieee_context.json"
 AUTO_STATE_FILE = BASE_DIR / "downloads" / "ieee_context_auto.json"
-DEFAULT_CREDENTIAL_FILE = Path("/Users/xixilys/clawd/.credentials/ieee.env")
+DEFAULT_CREDENTIAL_FILE = BASE_DIR / ".env"
 IEEE_HOME = "https://ieeexplore.ieee.org/Xplore/home.jsp"
 IEEE_INST_HELP = "https://ieeexplore.ieee.org/Xplorehelp/Help_Institutional_Sign_In.html"
-PASSPORT_HOST = "passport.escience.cn"
-EXPECTED_INSTITUTION_TEXT = "University of Chinese Academy of Sciences"
+SSO_HOST_HINT = os.getenv("IEEE_SSO_HOST", "").strip()
 EXPECTED_ACCESS_TEXT = "Access provided by:"
 
 
 def load_ieee_credentials(env_path: Optional[Path] = None) -> Dict[str, str]:
-    env_path = env_path or DEFAULT_CREDENTIAL_FILE
+    env_override = os.getenv("IEEE_CREDENTIAL_FILE", "").strip()
+    env_path = Path(env_override) if env_override else (env_path or DEFAULT_CREDENTIAL_FILE)
     data: Dict[str, str] = {}
 
     if env_path.exists():
@@ -56,6 +56,30 @@ def load_ieee_credentials(env_path: Optional[Path] = None) -> Dict[str, str]:
         )
 
     return data
+
+
+def _is_external_login_url(url: str) -> bool:
+    if not url:
+        return False
+
+    host = urlparse(url).netloc.lower()
+    if not host:
+        return False
+
+    if SSO_HOST_HINT:
+        return SSO_HOST_HINT.lower() in host
+
+    if "ieeexplore.ieee.org" in host:
+        return False
+
+    known_ieee_hosts = [
+        "ieee.org",
+        "w3.org",
+        "doi.org",
+        "crossref.org",
+        "seamlessaccess.org",
+    ]
+    return not any(host == item or host.endswith(f".{item}") for item in known_ieee_hosts)
 
 
 def create_ieee_context(browser, storage_state: Optional[Path] = None) -> BrowserContext:
@@ -89,7 +113,7 @@ def has_ieee_institutional_access(page: Page, context: BrowserContext) -> bool:
     except Exception:
         body = ""
 
-    if EXPECTED_ACCESS_TEXT in body and EXPECTED_INSTITUTION_TEXT in body:
+    if EXPECTED_ACCESS_TEXT in body:
         return True
 
     try:
@@ -100,7 +124,7 @@ def has_ieee_institutional_access(page: Page, context: BrowserContext) -> bool:
     cookie_map = {cookie.get("name", ""): cookie.get("value", "") for cookie in cookies}
     xpluserinfo = cookie_map.get("xpluserinfo", "")
     erights = cookie_map.get("ERIGHTS", "")
-    return EXPECTED_INSTITUTION_TEXT.replace(" ", "") in xpluserinfo or bool(erights)
+    return bool(xpluserinfo or erights)
 
 
 def _open_institutional_modal(page: Page) -> None:
@@ -163,7 +187,7 @@ def _click_institution_entry(page: Page, institution_name: str) -> bool:
                 if loc.count():
                     loc.click(timeout=3000)
                     page.wait_for_timeout(3000)
-                    if PASSPORT_HOST in page.url:
+                    if _is_external_login_url(page.url):
                         return True
                 
             except Exception:
@@ -198,7 +222,7 @@ def _click_institution_entry(page: Page, institution_name: str) -> bool:
     candidate = search_surface.locator("a.stats-Global_Inst_signin_typeahead", has_text=institution_name).first
     try:
         if candidate.is_visible():
-            # The click triggers a navigation chain: wayf.jsp → SAML → passport.escience.cn
+            # The click triggers a navigation chain through the institution SSO provider.
             try:
                 candidate.click()
             except Exception:
@@ -206,11 +230,11 @@ def _click_institution_entry(page: Page, institution_name: str) -> bool:
 
             deadline = time.time() + 30
             while time.time() < deadline:
-                if PASSPORT_HOST in page.url:
+                if _is_external_login_url(page.url):
                     return True
                 page.wait_for_timeout(1000)
 
-            if PASSPORT_HOST in page.url:
+            if _is_external_login_url(page.url):
                 return True
     except Exception:
         pass
@@ -227,17 +251,17 @@ def _click_institution_entry(page: Page, institution_name: str) -> bool:
         except Exception:
             page.keyboard.press("Enter")
         page.wait_for_timeout(8000)
-        if PASSPORT_HOST in page.url:
+        if _is_external_login_url(page.url):
             return True
 
-    return PASSPORT_HOST in page.url
+    return _is_external_login_url(page.url)
 
 
 def _find_passport_login_frame(page: Page):
     """Return the visible login surface (Page or Frame).
 
-    In renewal flows the visible CSTNet form can appear either:
-    - inside an oauth2 iframe on passport.escience.cn, or
+    In renewal flows the visible institution SSO form can appear either:
+    - inside an oauth2 iframe on the SSO provider, or
     - directly in the top document.
     """
     deadline = time.time() + 45
@@ -263,11 +287,11 @@ def _find_passport_login_frame(page: Page):
                         "() => { const el = document.getElementById('userName') || document.getElementById('username'); "
                         "return el ? el.offsetWidth > 0 && el.offsetHeight > 0 : false; }"
                     )
-                    logger.info(f"_find_passport: oauth2 frame visible={visible}")
+                    logger.info(f"_find_sso_login: oauth2 frame visible={visible}")
                     if visible:
                         return frame
             except Exception as e:
-                logger.info(f"_find_passport: oauth2 frame error: {e}")
+                logger.info(f"_find_sso_login: oauth2 frame error: {e}")
                 continue
 
         # Fallback: any frame with a visible #username or #userName
@@ -278,14 +302,14 @@ def _find_passport_login_frame(page: Page):
                     "return el ? el.offsetWidth > 0 && el.offsetHeight > 0 : false; }"
                 )
                 if visible:
-                    logger.info(f"_find_passport: fallback frame matched: {frame.url[:60]}")
+                    logger.info(f"_find_sso_login: fallback frame matched: {frame.url[:60]}")
                     return frame
             except Exception:
                 continue
 
         page.wait_for_timeout(1000)
 
-    raise RuntimeError("Visible passport login iframe not found")
+    raise RuntimeError("Visible institution login iframe not found")
 
 def _submit_passport_login(page: Page, username: str, password: str) -> bool:
     # Give the page a moment to load the iframe or finish redirecting
@@ -294,8 +318,8 @@ def _submit_passport_login(page: Page, username: str, password: str) -> bool:
     # Debug: log current state
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"_submit_passport_login: URL={page.url}")
-    logger.info(f"_submit_passport_login: {len(page.frames)} frames")
+    logger.info(f"_submit_sso_login: URL={page.url}")
+    logger.info(f"_submit_sso_login: {len(page.frames)} frames")
     for i, f in enumerate(page.frames):
         try:
             logger.info(f"  Frame {i}: {f.url[:80]}")
@@ -303,14 +327,14 @@ def _submit_passport_login(page: Page, username: str, password: str) -> bool:
             pass
     
     # If we already bounced back to IEEE and access is active, there's nothing to submit.
-    if "ieeexplore.ieee.org" in page.url and PASSPORT_HOST not in page.url:
-        logger.info("_submit_passport_login: already back on IEEE; skipping form submission")
+    if "ieeexplore.ieee.org" in page.url and not _is_external_login_url(page.url):
+        logger.info("_submit_sso_login: already back on IEEE; skipping form submission")
         return False
 
     try:
         frame = _find_passport_login_frame(page)
     except Exception as e:
-        logger.warning(f"_submit_passport_login: visible login surface not found: {e}")
+        logger.warning(f"_submit_sso_login: visible login surface not found: {e}")
         return False
 
     # Unhide form and login div if it's hidden
@@ -385,19 +409,19 @@ def auto_login_ieee_institution(
             pass
     
     ok = _click_institution_entry(page, credentials["IEEE_INST_NAME"])
-    if not ok and PASSPORT_HOST not in page.url:
-        logger.error("Failed to trigger institutional redirect to passport.escience.cn")
+    if not ok and not _is_external_login_url(page.url):
+        logger.error("Failed to trigger institutional redirect to the external SSO provider")
         return False
 
     deadline = time.time() + 40
-    while time.time() < deadline and PASSPORT_HOST not in page.url:
+    while time.time() < deadline and not _is_external_login_url(page.url):
         page.wait_for_timeout(500)
 
-    if PASSPORT_HOST not in page.url:
-        logger.error(f"Expected passport redirect, got {page.url}")
+    if not _is_external_login_url(page.url):
+        logger.error(f"Expected institutional SSO redirect, got {page.url}")
         return False
 
-    # Passport may auto-complete the SSO if credentials are still valid in session cookies.
+    # The SSO provider may auto-complete if credentials are still valid in session cookies.
     # Wait up to 20s: if passport redirects back to IEEE, check access and return.
     # If it stays on passport (needs fresh login), submit the login form.
     sso_deadline = time.time() + 20
@@ -425,8 +449,8 @@ def auto_login_ieee_institution(
                 return False
         page.wait_for_timeout(1000)
 
-    # If we're still on passport, submit the login form
-    if PASSPORT_HOST in page.url:
+    # If we're still on the SSO provider, submit the login form.
+    if _is_external_login_url(page.url):
         submitted = _submit_passport_login(
             page,
             credentials["IEEE_INST_USERNAME"],
@@ -438,12 +462,12 @@ def auto_login_ieee_institution(
             page.wait_for_timeout(6000)
 
         try:
-            current_title = page.title() if PASSPORT_HOST in page.url else ""
+            current_title = page.title() if _is_external_login_url(page.url) else ""
         except Exception as e:
-            logger.info(f"Skipping passport title check during navigation race: {e}")
+            logger.info(f"Skipping SSO title check during navigation race: {e}")
             current_title = ""
-        if PASSPORT_HOST in page.url and "Uncaught Exception" in current_title:
-            logger.error("Passport login failed with server-side Uncaught Exception")
+        if _is_external_login_url(page.url) and "Uncaught Exception" in current_title:
+            logger.error("Institutional SSO login failed with server-side Uncaught Exception")
             return False
 
     # We expect to return to IEEE and see institutional access.

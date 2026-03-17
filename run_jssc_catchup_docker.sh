@@ -3,15 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_TAG="${IEEE_DOWNLOAD_IMAGE:-ieeedownload-jssc:playwright-1.52.0}"
-CREDENTIAL_DIR="/Users/xixilys/clawd/.credentials"
+CREDENTIAL_DIR="${CREDENTIAL_DIR:-}"
 
 if ! command -v docker >/dev/null 2>&1; then
     echo "docker command not found" >&2
     exit 1
 fi
 
-if [ ! -d "$CREDENTIAL_DIR" ]; then
-    echo "credential directory not found: $CREDENTIAL_DIR" >&2
+if [ -z "$CREDENTIAL_DIR" ] || [ ! -d "$CREDENTIAL_DIR" ]; then
+    echo "Set CREDENTIAL_DIR to a local directory that contains your credential file(s)." >&2
     exit 1
 fi
 
