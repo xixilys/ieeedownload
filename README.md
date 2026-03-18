@@ -1,41 +1,30 @@
 # IEEE Xplore Venue Harvester
 
-Utilities for collecting IEEE Xplore metadata and PDFs for venue-focused harvest jobs, with resumable download workflows for JSSC and related conference proceedings.
+Playwright-based harvest scripts for IEEE Xplore metadata and PDFs, with resumable workflows for JSSC, VLSI, ISCAS, and topic-focused downloads.
 
-## What this repo contains
+## Highlights
 
-- `ieee_crawler.py`: interactive search and single-paper download helper.
-- `login.py`: saves a Playwright browser session after institutional sign-in succeeds.
-- `ieee_auto_login.py`: optional institution-SSO helper driven by local environment variables.
-- `bulk_download_by_venue.py`: enumerates venue-year results first, then filters and downloads target topics.
-- `resume_download_with_manual_login.py`: resumes batch downloads from a live browser session after manual login.
-- `jssc_full_harvest.py`: year-by-year JSSC harvester with resumable metadata and PDF downloads.
-- `jssc_container_catchup.py`: catch-up loop for Docker/Xvfb or OrbStack environments.
-- `run_jssc_catchup_orb.sh` and `jssc_orb_worker.sh`: OrbStack launcher and worker scripts.
-- `vlsi_full_harvest.py`: VLSI-focused batch harvester using the same Playwright session model.
+- Venue-level harvests for `JSSC`, `ISCAS`, and `VLSI`
+- Topic filtering for `CIM`, `AI accelerator`, `processor`, `coprocessor`, `near-memory`, and related directions
+- Resumable metadata and PDF downloads
+- Local-login and live-session workflows for IEEE institutional access
 
-## Public-safe defaults
+## Local config
 
-This repository is prepared for a public GitHub project:
+Use a local `.env` file or shell exports for institutional credentials. The repo ignores `.env`, downloads, logs, screenshots, and saved browser state by default.
 
-- No account names or passwords are committed.
-- Generated downloads, logs, screenshots, and saved browser state stay under ignored paths.
-- Institution-specific values have been replaced with environment-driven configuration.
+## Quick Start
 
-If you use local credentials, keep them outside the repository or in a local `.env` file that is not committed.
-
-## Setup
-
-### 1. Install Python dependencies
+1. Create a virtual environment and install dependencies.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install playwright==1.58.0
+pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-### 2. Configure local credentials
+2. Configure local credentials.
 
 Copy `.env.example` to `.env` and fill in your own values, or export the variables directly in your shell:
 
@@ -48,9 +37,9 @@ export IEEE_SSO_HOST="login.example.edu"
 
 `IEEE_SSO_HOST` is optional, but it helps the login helper recognize your institution's SSO redirect more reliably.
 
-## Recommended workflows
+## Workflows
 
-### Save a reusable browser session
+Pick the workflow that matches your access mode:
 
 ```bash
 python3 login.py
@@ -58,23 +47,17 @@ python3 login.py
 
 This launches a visible Chromium window, completes institutional sign-in, and saves the Playwright storage state to `downloads/ieee_context.json`.
 
-### Resume a batch after manual login
-
 ```bash
 python3 resume_download_with_manual_login.py
 ```
 
 This is the most reliable workflow when IEEE PDF access depends on a live browser session. Open a paper PDF once in the browser window, then the script continues downloading in the same session.
 
-### Run the JSSC catch-up loop locally
-
 ```bash
 python3 jssc_container_catchup.py --start-year 2020 --end-year 2026
 ```
 
 By default this writes output under `downloads/jssc_full_harvest`.
-
-### Run the JSSC catch-up loop in OrbStack
 
 Either export `IEEE_INST_*` variables before launching, or point `CREDENTIAL_FILE` to a local file that exists outside the repo:
 
@@ -85,6 +68,18 @@ export CREDENTIAL_FILE=/absolute/path/to/ieee.env
 
 The Orb worker writes logs to `jssc_orb_catchup.log`.
 
+## Scripts
+
+- `ieee_crawler.py`: interactive search and single-paper download helper.
+- `login.py`: saves a browser session after institutional sign-in succeeds.
+- `ieee_auto_login.py`: optional institution-SSO helper driven by local environment variables.
+- `bulk_download_by_venue.py`: venue-year enumeration plus topic filtering.
+- `resume_download_with_manual_login.py`: resumes batch downloads from a live browser session.
+- `jssc_full_harvest.py`: year-by-year JSSC harvester.
+- `jssc_container_catchup.py`: catch-up loop for Docker/Xvfb or OrbStack.
+- `run_jssc_catchup_orb.sh` and `jssc_orb_worker.sh`: OrbStack launcher and worker scripts.
+- `vlsi_full_harvest.py`: VLSI-focused batch harvester.
+
 ## Outputs
 
 - `downloads/ieee_context.json`: saved Playwright storage state.
@@ -92,10 +87,11 @@ The Orb worker writes logs to `jssc_orb_catchup.log`.
 - `downloads/venue_harvest_2018_2025/pdfs/`: downloaded PDFs for the venue workflow.
 - `downloads/jssc_full_harvest/<year>/metadata.json`: JSSC year-level metadata.
 - `downloads/jssc_full_harvest/<year>/.../*.pdf`: JSSC PDFs grouped by issue.
+- `downloads/jssc_full_harvest/<year>/issues.json`: issue-level summary data.
 
-All of these paths are gitignored.
+These paths are gitignored.
 
-## Notes on reliability
+## Notes
 
 IEEE institutional access is often tied to short-lived cookies and SSO redirects. In practice:
 
