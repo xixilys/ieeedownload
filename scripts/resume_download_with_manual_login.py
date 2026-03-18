@@ -11,8 +11,12 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _bootstrap import bootstrap_project_root
+
+PROJECT_ROOT = bootstrap_project_root()
+
 from bulk_download_by_venue import download_records
-from ieee_download_via_page import fetch_pdf_bytes_via_document_page
+from ieee_harvest.pdf import fetch_pdf_bytes_via_document_page
 
 
 logging.basicConfig(
@@ -20,11 +24,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent
-STATE_FILE = BASE_DIR / "downloads" / "ieee_context_auto.json"
+STATE_FILE = PROJECT_ROOT / "downloads" / "ieee_context_auto.json"
 if not STATE_FILE.exists():
-    STATE_FILE = BASE_DIR / "downloads" / "ieee_context.json"
-METADATA_FILE = BASE_DIR / "downloads" / "venue_harvest_2018_2025" / "metadata.json"
+    STATE_FILE = PROJECT_ROOT / "downloads" / "ieee_context.json"
+METADATA_FILE = PROJECT_ROOT / "downloads" / "venue_harvest_2018_2025" / "metadata.json"
 TEST_ARTICLE = "9181104"
 TEST_DOC_URL = f"https://ieeexplore.ieee.org/document/{TEST_ARTICLE}"
 TEST_PDF_URL = (

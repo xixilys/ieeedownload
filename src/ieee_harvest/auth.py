@@ -20,10 +20,10 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
 
-BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_STATE_FILE = BASE_DIR / "downloads" / "ieee_context.json"
-AUTO_STATE_FILE = BASE_DIR / "downloads" / "ieee_context_auto.json"
-DEFAULT_CREDENTIAL_FILE = BASE_DIR / ".env"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_STATE_FILE = PROJECT_ROOT / "downloads" / "ieee_context.json"
+AUTO_STATE_FILE = PROJECT_ROOT / "downloads" / "ieee_context_auto.json"
+DEFAULT_CREDENTIAL_FILE = PROJECT_ROOT / ".env"
 IEEE_HOME = "https://ieeexplore.ieee.org/Xplore/home.jsp"
 IEEE_INST_HELP = "https://ieeexplore.ieee.org/Xplorehelp/Help_Institutional_Sign_In.html"
 SSO_HOST_HINT = os.getenv("IEEE_SSO_HOST", "").strip()

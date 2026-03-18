@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ORB_VENV="${ORB_VENV:-$HOME/.venvs/ieee_download}"
-ORB_LOG="${ORB_LOG:-$ROOT_DIR/jssc_orb_catchup.log}"
+ORB_LOG="${ORB_LOG:-$ROOT_DIR/catchup_orb.log}"
 CREDENTIAL_FILE="${CREDENTIAL_FILE:-}"
+TARGET_SCRIPT="${TARGET_SCRIPT:-templates/incremental_catchup_template.py}"
 
 if [ -n "$CREDENTIAL_FILE" ]; then
     if [ ! -f "$CREDENTIAL_FILE" ]; then
@@ -42,4 +43,4 @@ if [ -n "$CREDENTIAL_FILE" ]; then
 fi
 
 cd "$ROOT_DIR"
-xvfb-run -a python -u jssc_container_catchup.py "$@" 2>&1 | tee -a "$ORB_LOG"
+xvfb-run -a python -u "$TARGET_SCRIPT" "$@" 2>&1 | tee -a "$ORB_LOG"

@@ -14,7 +14,11 @@ from typing import Dict, Iterable, List, Optional
 
 from playwright.sync_api import sync_playwright
 
-from ieee_download_via_page import fetch_pdf_bytes_via_document_page
+from _bootstrap import bootstrap_project_root
+
+PROJECT_ROOT = bootstrap_project_root()
+
+from ieee_harvest.pdf import fetch_pdf_bytes_via_document_page
 
 
 logging.basicConfig(
@@ -28,12 +32,11 @@ END_YEAR = 2025
 ROWS_PER_PAGE = 100
 REQUEST_SLEEP_SECONDS = 0.25
 
-BASE_DIR = Path(__file__).resolve().parent
-DOWNLOAD_DIR = BASE_DIR / "downloads" / "topic_harvest_2018_2025"
+DOWNLOAD_DIR = PROJECT_ROOT / "downloads" / "topic_harvest_2018_2025"
 PDF_DIR = DOWNLOAD_DIR / "pdfs"
-STATE_FILE = BASE_DIR / "downloads" / "ieee_context_auto.json"
+STATE_FILE = PROJECT_ROOT / "downloads" / "ieee_context_auto.json"
 if not STATE_FILE.exists():
-    STATE_FILE = BASE_DIR / "downloads" / "ieee_context.json"
+    STATE_FILE = PROJECT_ROOT / "downloads" / "ieee_context.json"
 METADATA_FILE = DOWNLOAD_DIR / "metadata.json"
 
 SEARCH_URL = "https://ieeexplore.ieee.org/rest/search"

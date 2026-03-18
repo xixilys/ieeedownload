@@ -7,11 +7,13 @@ IEEE -> Institutional Sign In -> Access Through Your Institution / 记住机构�
 -> 机构 SSO iframe 真人式输入 -> 返回 IEEE 并保存登录态
 """
 
-from pathlib import Path
-
 from playwright.sync_api import sync_playwright
 
-from ieee_auto_login import (
+from _bootstrap import bootstrap_project_root
+
+bootstrap_project_root()
+
+from ieee_harvest.auth import (
     DEFAULT_STATE_FILE,
     auto_login_ieee_institution,
     create_ieee_context,

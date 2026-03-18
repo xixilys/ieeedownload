@@ -1,21 +1,37 @@
-# IEEE Xplore Venue Harvester
+# IEEE Xplore Harvester
 
-Playwright-based harvest scripts for IEEE Xplore metadata and PDFs, with resumable workflows for JSSC, VLSI, ISCAS, and topic-focused downloads.
+Playwright-based tooling for IEEE Xplore metadata collection and PDF download, organized as a small library plus runnable scripts, templates, and long-run wrappers.
 
-## Highlights
+## Layout
 
-- Venue-level harvests for `JSSC`, `ISCAS`, and `VLSI`
-- Topic filtering for `CIM`, `AI accelerator`, `processor`, `coprocessor`, `near-memory`, and related directions
-- Resumable metadata and PDF downloads
-- Local-login and live-session workflows for IEEE institutional access
+```text
+src/ieee_harvest/
+  auth.py                  shared IEEE / institutional login helpers
+  pdf.py                   PDF download helpers
 
-## Local config
+scripts/
+  login.py                 save a reusable IEEE browser session
+  interactive_crawler.py   interactive search + single-paper download
+  bulk_download_by_venue.py
+  bulk_download_topics.py
+  resume_download_with_manual_login.py
 
-Use a local `.env` file or shell exports for institutional credentials. The repo ignores `.env`, downloads, logs, screenshots, and saved browser state by default.
+templates/
+  venue_harvester_template.py
+  incremental_catchup_template.py
 
-## Quick Start
+ops/docker/
+  Dockerfile
+  run_catchup_docker.sh
 
-1. Create a virtual environment and install dependencies.
+ops/orb/
+  orb_worker.sh
+  run_catchup_orb.sh
+```
+
+The shared logic lives in `src/`, the direct entrypoints live in `scripts/`, and venue-specific long-running jobs are meant to start from the files in `templates/`.
+
+## Install
 
 ```bash
 python3 -m venv .venv
@@ -24,9 +40,9 @@ pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-2. Configure local credentials.
+Local credentials should stay in shell exports or a local `.env`. The repo ignores `.env`, downloads, logs, screenshots, and saved browser state.
 
-Copy `.env.example` to `.env` and fill in your own values, or export the variables directly in your shell:
+Example variables:
 
 ```bash
 export IEEE_INST_NAME="Example University"
@@ -35,75 +51,84 @@ export IEEE_INST_PASSWORD="your-password"
 export IEEE_SSO_HOST="login.example.edu"
 ```
 
-`IEEE_SSO_HOST` is optional, but it helps the login helper recognize your institution's SSO redirect more reliably.
+## Common Usage
 
-## Workflows
-
-Pick the workflow that matches your access mode:
+Save a reusable login session:
 
 ```bash
-python3 login.py
+python3 scripts/login.py
 ```
 
-This launches a visible Chromium window, completes institutional sign-in, and saves the Playwright storage state to `downloads/ieee_context.json`.
+Run the interactive crawler:
 
 ```bash
-python3 resume_download_with_manual_login.py
+python3 scripts/interactive_crawler.py
 ```
 
-This is the most reliable workflow when IEEE PDF access depends on a live browser session. Open a paper PDF once in the browser window, then the script continues downloading in the same session.
+Resume a batch from a live authenticated browser session:
 
 ```bash
-python3 jssc_container_catchup.py --start-year 2020 --end-year 2026
+python3 scripts/resume_download_with_manual_login.py
 ```
 
-By default this writes output under `downloads/jssc_full_harvest`.
-
-Either export `IEEE_INST_*` variables before launching, or point `CREDENTIAL_FILE` to a local file that exists outside the repo:
+Run the built-in multi-venue topic workflow:
 
 ```bash
-export CREDENTIAL_FILE=/absolute/path/to/ieee.env
-./run_jssc_catchup_orb.sh --start-year 2020 --end-year 2026
+python3 scripts/bulk_download_by_venue.py
 ```
 
-The Orb worker writes logs to `jssc_orb_catchup.log`.
+## Template Workflow
 
-## Scripts
+The repository no longer keeps JSSC / VLSI / other venue-specific harvesters as first-class scripts. Instead, start from the templates in `templates/`.
 
-- Login/bootstrap helpers for institutional IEEE access.
-- Venue and topic harvesters for metadata collection and PDF download.
-- Resume scripts for continuing a batch from an already-authenticated browser session.
-- Docker and OrbStack wrappers for running long catch-up jobs more safely.
+1. Duplicate or edit `templates/venue_harvester_template.py` and customize:
+   `VENUE_NAME`
+   `VENUE_QUERY_TEMPLATES`
+   `VENUE_INCLUDE_PATTERNS`
+   `VENUE_EXCLUDE_PATTERNS`
+   `DEFAULT_OUTPUT_ROOT`
+2. Run a one-shot venue harvest:
 
-The repository keeps the runnable Python scripts at the top level on purpose so each one can be invoked directly without a package install step. If you want a more conventional `src/` or `scripts/` layout later, we can refactor it after the workflow is stable.
+```bash
+python3 templates/venue_harvester_template.py --start-year 2018 --end-year 2025
+```
 
-## Outputs
+3. For long-running catch-up loops, use `templates/incremental_catchup_template.py`:
 
-- `downloads/ieee_context.json`: saved Playwright storage state.
-- `downloads/venue_harvest_2018_2025/metadata.json`: filtered venue metadata.
-- `downloads/venue_harvest_2018_2025/pdfs/`: downloaded PDFs for the venue workflow.
-- `downloads/jssc_full_harvest/<year>/metadata.json`: JSSC year-level metadata.
-- `downloads/jssc_full_harvest/<year>/.../*.pdf`: JSSC PDFs grouped by issue.
-- `downloads/jssc_full_harvest/<year>/issues.json`: issue-level summary data.
-
-These paths are gitignored.
-
-## Notes
-
-IEEE institutional access is often tied to short-lived cookies and SSO redirects. In practice:
-
-- Saved browser state helps, but it is not always enough for PDF downloads.
-- Headless request replay may return an HTML interstitial instead of a PDF.
-- A visible browser session plus one successful manual PDF open is often the most reliable way to bootstrap long downloads.
-
-That is why this repo includes both automated login helpers and a manual-login resume path.
+```bash
+python3 templates/incremental_catchup_template.py --start-year 2018 --end-year 2025
+```
 
 ## Docker First
 
-For long-running harvests, Docker is the recommended way to run the project:
+For long-running jobs, Docker is the recommended runner:
 
 ```bash
-./run_jssc_catchup_docker.sh --start-year 2020 --end-year 2026
+export CREDENTIAL_DIR=/absolute/path/to/credentials
+./ops/docker/run_catchup_docker.sh --start-year 2018 --end-year 2025
 ```
 
-This keeps the Playwright environment isolated and avoids host browser/window issues. OrbStack is the next-best option when you want a persistent local VM-style runner.
+By default this runs `templates/incremental_catchup_template.py` inside an isolated Playwright environment. If you create your own template file, point the runner at it:
+
+```bash
+export TARGET_SCRIPT=templates/my_venue_catchup.py
+./ops/docker/run_catchup_docker.sh --start-year 2018 --end-year 2025
+```
+
+OrbStack is supported as a second option:
+
+```bash
+export CREDENTIAL_FILE=/absolute/path/to/ieee.env
+./ops/orb/run_catchup_orb.sh --start-year 2018 --end-year 2025
+```
+
+## Outputs
+
+- `downloads/ieee_context.json`: saved Playwright storage state
+- `downloads/venue_harvest_2018_2025/`: output from the built-in multi-venue workflow
+- `downloads/topic_harvest_2018_2025/`: output from the built-in topic workflow
+- `downloads/venue_template/`: default output for the generic template harvester
+
+## Notes
+
+IEEE institutional access is fragile in practice. Saved browser state helps, but a live browser session plus one successful manual PDF open is often the most reliable bootstrap for bulk downloads. That is why the repo keeps both automated login helpers and a manual resume path.

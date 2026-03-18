@@ -14,8 +14,12 @@ from pathlib import Path
 from typing import Optional, List, Dict
 from playwright.sync_api import sync_playwright
 
-from ieee_auto_login import auto_login_ieee_institution, load_ieee_credentials
-from ieee_download_via_page import fetch_pdf_bytes_via_document_page
+from _bootstrap import bootstrap_project_root
+
+PROJECT_ROOT = bootstrap_project_root()
+
+from ieee_harvest.auth import auto_login_ieee_institution, load_ieee_credentials
+from ieee_harvest.pdf import fetch_pdf_bytes_via_document_page
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -25,7 +29,10 @@ logger = logging.getLogger(__name__)
 
 class IEEE爬虫:
     def __init__(self, 输出目录: str = "./downloads", 保存登录态: bool = True):
-        self.输出目录 = Path(输出目录)
+        输出路径 = Path(输出目录)
+        if not 输出路径.is_absolute():
+            输出路径 = (PROJECT_ROOT / 输出路径).resolve()
+        self.输出目录 = 输出路径
         self.输出目录.mkdir(parents=True, exist_ok=True)
         self.保存登录态 = 保存登录态
         self.登录态文件 = self.输出目录 / "ieee_context.json"

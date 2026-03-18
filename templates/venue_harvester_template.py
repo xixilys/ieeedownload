@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
-Download full top-conference VLSI Symposium papers from IEEE Xplore (2018-2026 by default),
-covering Technology + Circuits (including combined Technology and Circuits proceedings),
-organized by year under a target directory.
+Template harvester for a single IEEE venue.
 
-Output layout:
-/Volumes/extend_2/research_data/vlsi_paper/
+Copy this file, customize the venue constants below, and then run it directly.
+The output layout is:
+
+downloads/venue_template/
   ├── 2018/
-  │   ├── metadata.json
-  │   └── pdfs/*.pdf
-  ├── 2019/
   │   ├── metadata.json
   │   └── pdfs/*.pdf
   └── ...
@@ -28,14 +25,18 @@ from typing import Dict, Iterable, List, Optional
 
 from playwright.sync_api import sync_playwright
 
-from ieee_auto_login import (
+from _bootstrap import bootstrap_project_root
+
+PROJECT_ROOT = bootstrap_project_root()
+
+from ieee_harvest.auth import (
     DEFAULT_STATE_FILE,
     AUTO_STATE_FILE,
     auto_login_ieee_institution,
     has_ieee_institutional_access,
     load_ieee_credentials,
 )
-from ieee_download_via_page import fetch_pdf_bytes_via_document_page, page_has_paused_access
+from ieee_harvest.pdf import fetch_pdf_bytes_via_document_page, page_has_paused_access
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -48,24 +49,16 @@ ROWS_PER_PAGE = 100
 DOWNLOAD_SLEEP_SECONDS = 8
 LONG_BREAK_EVERY = 10
 LONG_BREAK_SECONDS = 120
-DEFAULT_OUTPUT_ROOT = Path("/Volumes/extend_2/research_data/vlsi_paper")
-VLSI_QUERY_TEMPLATES = [
-    '{year} "Symposium on VLSI Technology"',
-    '{year} "Symposium on VLSI Circuits"',
-    '{year} "Symposium on VLSI Technology and Circuits"',
+DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "downloads" / "venue_template"
+VENUE_NAME = "Venue Template"
+VENUE_QUERY_TEMPLATES = [
+    '{year} "Venue Name"',
 ]
-
-
-VLSI_INCLUDE_PATTERNS = [
-    # Matches titles like "2019 Symposium on VLSI Technology",
-    # "2020 IEEE Symposium on VLSI Technology",
-    # "2023 IEEE Symposium on VLSI Technology and Circuits (VLSI Technology and Circuits)"
-    re.compile(r"Symposium on VLSI Technology(?:\s|$)", re.I),
-    re.compile(r"Symposium on VLSI Circuits(?:\s|$)", re.I),
+VENUE_INCLUDE_PATTERNS = [
+    re.compile(r"Venue Name", re.I),
 ]
-VLSI_EXCLUDE_PATTERNS = [
-    re.compile(r"Systems and Application", re.I),
-    re.compile(r"VLSI-TSA", re.I),
+VENUE_EXCLUDE_PATTERNS = [
+    re.compile(r"Workshop", re.I),
 ]
 
 
@@ -92,7 +85,7 @@ def wait_until_writable(path: Path, timeout_seconds: int = 600, interval_seconds
     raise RuntimeError(f'Output path remained unavailable: {path}; last_error={last_error}')
 
 
-class VLSIHarvester:
+class VenueHarvester:
     def __init__(self, output_root: Path, state_file: Optional[Path] = None, headless: bool = False) -> None:
         self.output_root = output_root
         self.output_root.mkdir(parents=True, exist_ok=True)
@@ -257,7 +250,7 @@ class VLSIHarvester:
 
         def handle_page(page_result: Dict) -> None:
             for record in page_result.get("records", []):
-                if not self._is_vlsi_record(record, year):
+                if not self._is_venue_record(record, year):
                     continue
                 article_number = str(record.get("articleNumber") or "").strip()
                 if not article_number:
@@ -265,9 +258,9 @@ class VLSIHarvester:
                 if article_number not in records_by_article:
                     records_by_article[article_number] = self._normalize_record(record)
 
-        for query_template in VLSI_QUERY_TEMPLATES:
+        for query_template in VENUE_QUERY_TEMPLATES:
             query = query_template.format(year=year)
-            logger.info("Searching VLSI papers for year=%s query=%s", year, query)
+            logger.info("Searching %s papers for year=%s query=%s", VENUE_NAME, year, query)
             first_page = self._search_page(query, 1)
             total_pages = int(first_page.get("totalPages") or 0)
             logger.info(
@@ -284,7 +277,7 @@ class VLSIHarvester:
         ordered = sorted(
             records_by_article.values(), key=lambda item: (item.get("title", ""), item.get("article_number", ""))
         )
-        logger.info("Year=%s normalized VLSI records=%s", year, len(ordered))
+        logger.info("Year=%s normalized %s records=%s", year, VENUE_NAME, len(ordered))
         return ordered
 
     def _search_page(self, query: str, page_number: int, attempts: int = 5) -> Dict:
@@ -349,14 +342,14 @@ class VLSIHarvester:
             time.sleep(max(REQUEST_SLEEP_SECONDS, attempt * 2))
         raise RuntimeError(f"Search failed after retries for year query {query} page {page_number}")
 
-    def _is_vlsi_record(self, record: Dict, year: int) -> bool:
+    def _is_venue_record(self, record: Dict, year: int) -> bool:
         publication_title = str(record.get("publicationTitle", "") or "")
         publication_year = str(record.get("publicationYear", "") or "")
         if publication_year != str(year):
             return False
-        if not any(pattern.search(publication_title) for pattern in VLSI_INCLUDE_PATTERNS):
+        if not any(pattern.search(publication_title) for pattern in VENUE_INCLUDE_PATTERNS):
             return False
-        if any(pattern.search(publication_title) for pattern in VLSI_EXCLUDE_PATTERNS):
+        if any(pattern.search(publication_title) for pattern in VENUE_EXCLUDE_PATTERNS):
             return False
         return True
 
@@ -582,7 +575,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    harvester = VLSIHarvester(args.output_root, args.state_file, headless=args.headless)
+    harvester = VenueHarvester(args.output_root, args.state_file, headless=args.headless)
     try:
         harvester.run(args.start_year, args.end_year, args.max_downloads_per_year)
     finally:

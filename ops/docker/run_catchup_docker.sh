@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_TAG="${IEEE_DOWNLOAD_IMAGE:-ieeedownload-jssc:playwright-1.52.0}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+IMAGE_TAG="${IEEE_DOWNLOAD_IMAGE:-ieee-download:playwright-1.58.0}"
 CREDENTIAL_DIR="${CREDENTIAL_DIR:-}"
+TARGET_SCRIPT="${TARGET_SCRIPT:-templates/incremental_catchup_template.py}"
 
 if ! command -v docker >/dev/null 2>&1; then
     echo "docker command not found" >&2
@@ -17,7 +18,7 @@ fi
 
 if ! docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
     echo "Building Docker image $IMAGE_TAG ..."
-    docker build -t "$IMAGE_TAG" -f "$ROOT_DIR/Dockerfile.jssc" "$ROOT_DIR"
+    docker build -t "$IMAGE_TAG" -f "$ROOT_DIR/ops/docker/Dockerfile" "$ROOT_DIR"
 fi
 
 exec docker run --rm --init \
@@ -26,4 +27,4 @@ exec docker run --rm --init \
     -v "$CREDENTIAL_DIR:$CREDENTIAL_DIR:ro" \
     -w /work \
     "$IMAGE_TAG" \
-    "$@"
+    xvfb-run -a python -u "$TARGET_SCRIPT" "$@"

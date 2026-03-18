@@ -5,12 +5,14 @@ import argparse
 import json
 import logging
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Dict, Optional
 
-HARVEST_SCRIPT = Path(__file__).resolve().parent / "vlsi_full_harvest.py"
-PYTHON = "/usr/bin/python3"
+HARVEST_SCRIPT = Path(__file__).resolve().parent / "venue_harvester_template.py"
+PYTHON = sys.executable
+DEFAULT_OUTPUT_ROOT = Path(__file__).resolve().parents[1] / "downloads" / "venue_template"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -59,7 +61,7 @@ def main() -> None:
     parser.add_argument("--end-year", type=int, default=2026)
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--cooldown-seconds", type=int, default=180)
-    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--max-stalled-batches", type=int, default=2)
     parser.add_argument("--headless", action="store_true", help="Run child Playwright harvest batches in headless mode")
     args = parser.parse_args()
