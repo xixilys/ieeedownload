@@ -70,15 +70,12 @@ The Orb worker writes logs to `jssc_orb_catchup.log`.
 
 ## Scripts
 
-- `ieee_crawler.py`: interactive search and single-paper download helper.
-- `login.py`: saves a browser session after institutional sign-in succeeds.
-- `ieee_auto_login.py`: optional institution-SSO helper driven by local environment variables.
-- `bulk_download_by_venue.py`: venue-year enumeration plus topic filtering.
-- `resume_download_with_manual_login.py`: resumes batch downloads from a live browser session.
-- `jssc_full_harvest.py`: year-by-year JSSC harvester.
-- `jssc_container_catchup.py`: catch-up loop for Docker/Xvfb or OrbStack.
-- `run_jssc_catchup_orb.sh` and `jssc_orb_worker.sh`: OrbStack launcher and worker scripts.
-- `vlsi_full_harvest.py`: VLSI-focused batch harvester.
+- Login/bootstrap helpers for institutional IEEE access.
+- Venue and topic harvesters for metadata collection and PDF download.
+- Resume scripts for continuing a batch from an already-authenticated browser session.
+- Docker and OrbStack wrappers for running long catch-up jobs more safely.
+
+The repository keeps the runnable Python scripts at the top level on purpose so each one can be invoked directly without a package install step. If you want a more conventional `src/` or `scripts/` layout later, we can refactor it after the workflow is stable.
 
 ## Outputs
 
@@ -100,3 +97,13 @@ IEEE institutional access is often tied to short-lived cookies and SSO redirects
 - A visible browser session plus one successful manual PDF open is often the most reliable way to bootstrap long downloads.
 
 That is why this repo includes both automated login helpers and a manual-login resume path.
+
+## Docker First
+
+For long-running harvests, Docker is the recommended way to run the project:
+
+```bash
+./run_jssc_catchup_docker.sh --start-year 2020 --end-year 2026
+```
+
+This keeps the Playwright environment isolated and avoids host browser/window issues. OrbStack is the next-best option when you want a persistent local VM-style runner.
